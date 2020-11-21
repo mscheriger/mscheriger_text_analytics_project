@@ -6,7 +6,7 @@ from transformers import BertForQuestionAnswering
 from transformers import BertTokenizer
 from nltk .tokenize import word_tokenize
 from nltk.corpus import stopwords
-from ir_method import calculate_accuracy, get_all_data
+from src.ir_method import calculate_accuracy, get_all_data
 
 model = BertForQuestionAnswering.from_pretrained('bert-large-uncased-whole-word-masking-finetuned-squad')
 tokenizer = BertTokenizer.from_pretrained('bert-large-uncased-whole-word-masking-finetuned-squad')
@@ -15,6 +15,16 @@ es = Elasticsearch([{'host': 'localhost', 'port': 9200}])
 sw = stopwords.words('english')  
 
 def get_answer(line):
+    '''
+    This function returns the answer to a question from a given context using Bert
+
+    Input:
+        1. line (dictionary): dictionary containing the question and context
+
+    Output:
+        2. answer (string): Answer to the question in string format
+    '''
+
     question = line['question']['stem']
     context = line['context']
 
@@ -37,6 +47,18 @@ def get_answer(line):
     return answer
 
 def get_answer_BERT(es,question,choices):
+    '''
+    This function returns the answer to a question that is asked by the API
+
+    Input:
+        1. es: Elasticsearch database object
+        2. question (string): The question in string format
+        3. choices: List of strings containing the choices
+
+    Output:
+        1. label of the correct answer
+    '''
+
     context = get_paragraph(es,question)
     line = {'question':{'stem':question},'context':context}
     choice_list = []
@@ -47,6 +69,16 @@ def get_answer_BERT(es,question,choices):
     return make_prediction(line,answer)
 
 def similarity(text1,text2):
+    '''
+    Returns the cosine similarity between two texts
+
+    Input:
+        1. text1: First sentence
+        2. text2: Second sentence
+
+    Output:
+        1. Similarity score
+    '''
     list1 = word_tokenize(text1)  
     list2 = word_tokenize(text2) 
     l1 =[];l2 =[] 
@@ -72,12 +104,33 @@ def similarity(text1,text2):
     return cosine
 
 def rouge_similarity(text1,text2):
+    '''
+    Returns the Rouge similarity between two texts
+
+    Input:
+        1. text1: First sentence
+        2. text2: Second sentence
+
+    Output:
+        1. Similarity score
+    '''
     evaluator = rouge.Rouge()
 
-    scores = evaluator.get_scores(text1,text2)
+    scores = evaluator.get_scores(text1,text2)[0]
     return scores['rouge-l']['f']
 
 def make_prediction(line,answer,use_rouge=False):
+    '''
+    Function returns the label of the prediction
+
+    Input:
+        1. line (dictionary): Dictionary containing the question
+        2. answer (string): answer according to BERT
+        3. use_rouge (boolean): If true, use Rouge. Else, use Cosine
+    
+    Output:
+        1. Label of the prediction
+    '''
     prediction='A'
     score=0
     for choice in line['question']['choices']:
@@ -91,6 +144,18 @@ def make_prediction(line,answer,use_rouge=False):
     return prediction
 
 def run_bert(train=True,use_rouge=False,ten=False):
+    '''
+    Wrapper function that runs BERT for all questions in the corpus
+
+    Input:
+        1. train (boolean): If true uses training data, else test
+        2. use_rouge (boolean): If true uses rouge similarity score, else cosine
+        3. ten (boolean): If true uses context of 10 lines, else 5
+    
+    Output:
+        1. Total accuracy
+    '''
+
     ##Runs Bert predictions. Returns accuracy
     path = 'obj/prediction_bert'
     if train:
@@ -112,8 +177,10 @@ def run_bert(train=True,use_rouge=False,ten=False):
     answers = list(map(get_answer,data))
     print('Making predictions')
     for qa,answer in zip(data,answers):
-        qa['prediction'] = make_prediction(qa,answer,use_rouge)
-
+        try:
+            qa['prediction'] = make_prediction(qa,answer,use_rouge)
+        except ValueError:
+            qa['prediction'] = 'A'
     if use_rouge:
         path = path[:-4]
         path += '_rouge.pkl'
@@ -123,11 +190,32 @@ def run_bert(train=True,use_rouge=False,ten=False):
     return calculate_accuracy(data)
 
 def get_paragraph(es,text,lines=5):
-    #Returns top search results as a paragraph
+    '''
+    Returns top search results as a paragraph
+
+    Input:
+        1. es: Elasticsearch database object
+        2. text: Text to use in the query
+        3. lines: Number of lines to return.
+
+    Output:
+        Context of the question
+    '''
     query = es.search(body={"query": {"match": {'text':text}}})
     return ' '.join([h['_source']['text'] for h in query['hits']['hits'][:lines]])
 
 def get_relevant_text(lines=5):
+    '''
+    Returns context for each question for all datasets, which is then saved in the obj folder
+
+    Input:
+        1. lines: Number of lines for each question's context
+    
+    Output:
+        1. Training data with context
+        2. Test data with context
+    '''
+
     question_answers_train = get_all_data()
     print('Loaded Training questions')
     question_answers_test = get_all_data(train=False)

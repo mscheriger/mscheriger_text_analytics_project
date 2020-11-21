@@ -1,0 +1,4 @@
+use_rouge: True
+train: False 
+ten: True
+lines: 10
